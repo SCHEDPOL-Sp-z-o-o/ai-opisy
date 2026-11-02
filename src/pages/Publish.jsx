@@ -19,17 +19,18 @@ export default function Publish({ profile }) {
   const canPublish = ['akceptujacy', 'admin'].includes(profile?.role)
 
   async function load() {
-    const [ch, d, p, f] = await Promise.all([
+    const [ch, d, p, f, t] = await Promise.all([
       supabase.from('channels').select('*').eq('active', true).order('code'),
       supabase.from('descriptions').select('id, family_id, channel_id, product_id, version, status, is_base, published_at, publish_error, created_at').order('version', { ascending: false }),
       supabase.from('products').select('id, sku, baselinker_product_id'),
       supabase.from('product_families').select('id, model_name'),
+      supabase.from('product_titles').select('product_id, channel_id, title, status'),   // tytuły z Generatora tytułów (przed migracją 44 – brak)
     ])
     const latest = {}
     for (const x of d.data || []) { const k = `${x.channel_id}|${x.product_id}`; if (!latest[k]) latest[k] = x }
     const order = { ro: 1, hu: 2, bg: 3 }
     const chans = (ch.data || []).sort((a, b) => (order[a.language] || 9) - (order[b.language] || 9))
-    setData({ channels: chans, rows: Object.values(latest), sku: Object.fromEntries((p.data || []).map(x => [x.id, x])), fam: Object.fromEntries((f.data || []).map(x => [x.id, x.model_name])) })
+    setData({ titles: Object.fromEntries((t?.data || []).map(x => [`${x.channel_id}|${x.product_id}`, x])), channels: chans, rows: Object.values(latest), sku: Object.fromEntries((p.data || []).map(x => [x.id, x])), fam: Object.fromEntries((f.data || []).map(x => [x.id, x.model_name])) })
     setChannel(c => c || chans[0]?.id)
   }
   useEffect(() => { load() }, [])
@@ -51,8 +52,17 @@ export default function Publish({ profile }) {
     setBusy(true); setErr(''); setRes(null)
     try {
       const out = { published: 0, failed: [], skipped: [], dry_run: false, would_publish: 0 }
-      for (let i = 0; i < ids.length; i += 100) {
-        const r = await runJob('publish_batch', { description_ids: ids.slice(i, i + 100) }, { url: PUBLISH_URL, timeoutSec: 60 + ids.length * 2 })
+      // tytuł: jeśli produkt ma tytuł z Generatora tytułów, musi być zaakceptowany; bez niego – tytuł z opisu (jak dotąd)
+      const titles = {}, okIds = []
+      for (const id of ids) {
+        const r0 = shown.find(r => r.id === id), t = data.titles[`${r0.channel_id}|${r0.product_id}`]
+        if (t && t.status !== 'zaakceptowany') { out.skipped.push({ sku: data.sku[r0.product_id]?.sku, reason: 'tytuł niezaakceptowany (Generator tytułów)' }); continue }
+        if (t) titles[id] = t.title
+        okIds.push(id)
+      }
+      for (let i = 0; i < okIds.length; i += 100) {
+        const part = okIds.slice(i, i + 100)
+        const r = await runJob('publish_batch', { description_ids: part, titles: Object.fromEntries(part.filter(id => titles[id]).map(id => [id, titles[id]])) }, { url: PUBLISH_URL, timeoutSec: 60 + part.length * 2 })
         out.dry_run = r.dry_run; out.published += r.published || 0; out.would_publish += r.would_publish || 0
         out.failed.push(...(r.failed || [])); out.skipped.push(...(r.skipped || []))
         if (r.example) out.example = r.example
@@ -92,13 +102,14 @@ export default function Publish({ profile }) {
           <table className="compact">
             <thead><tr>
               {view !== 'opublikowane' && <th><input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(shown.map(r => r.id)))} aria-label="Zaznacz wszystkie" /></th>}
-              <th>Rodzina</th><th>SKU</th><th>Opis</th><th>Wersja</th><th>{view === 'opublikowane' ? 'Opublikowano' : view === 'bledy' ? 'Błąd' : 'ID w Baselinkerze'}</th><th /></tr></thead>
+              <th>Rodzina</th><th>SKU</th><th>Opis</th><th>Tytuł</th><th>Wersja</th><th>{view === 'opublikowane' ? 'Opublikowano' : view === 'bledy' ? 'Błąd' : 'ID w Baselinkerze'}</th><th /></tr></thead>
             <tbody>{shown.map(r => {
               const p = data.sku[r.product_id] || {}
               return (
                 <tr key={r.id}>
                   {view !== 'opublikowane' && <td><input type="checkbox" checked={sel.has(r.id)} onChange={() => { const n = new Set(sel); n.has(r.id) ? n.delete(r.id) : n.add(r.id); setSel(n) }} /></td>}
-                  <td>{data.fam[r.family_id]}</td><td className="mono">{p.sku}</td><td>{r.is_base ? 'bazowy' : 'wariant'}</td><td>v{r.version}</td>
+                  <td>{data.fam[r.family_id]}</td><td className="mono">{p.sku}</td><td>{r.is_base ? 'bazowy' : 'wariant'}</td>
+                  <td>{(() => { const t = data.titles[`${r.channel_id}|${r.product_id}`]; return !t ? <span className="muted small" title="Tytuł z opisu">z opisu</span> : t.status === 'zaakceptowany' ? <span className="tag okt" title={t.title}>zaakceptowany</span> : <span className="tag warn" title={t.title}>do akceptacji</span> })()}</td><td>v{r.version}</td>
                   <td className={view === 'bledy' ? 'flags' : 'muted'}>{view === 'opublikowane' ? new Date(r.published_at).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' }) : view === 'bledy' ? r.publish_error : (p.baselinker_product_id || <span className="tag warn">brak</span>)}</td>
                   <td><Link to={`/weryfikacja/${r.id}`}>Podgląd</Link></td>
                 </tr>

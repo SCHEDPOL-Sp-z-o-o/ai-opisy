@@ -786,3 +786,14 @@ tr.row-dirty td { background: #FFFBEA; }
 .cell-editor { margin-top: 12px; }
 .cell-editor .cell-input, .cell-editor textarea { width: 100%; font: inherit; padding: 8px; }
 .req-must { font-weight: 600; }
+/* Tytuły */
+.tt-seg { margin: 10px 0; }
+.tt-comps { list-style: decimal; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; margin: 6px 0 12px; }
+.tt-comps li { display: flex; align-items: center; gap: 10px; }
+.tt-comps li.off { opacity: .55; }
+.tt-move { display: inline-flex; gap: 2px; }
+.tt-note { flex: 1; min-width: 200px; }
+.tt-table td { vertical-align: top; }
+.tt-cell { min-width: 420px; }
+.tt-input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.tt-act { white-space: nowrap; }

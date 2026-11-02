@@ -1,7 +1,7 @@
 // Reguły pól oferty kanału: skąd wartość (PIM, pole produktu, atrybut, wymiar, treść, zdjęcie, rodzina, stała) + przekształcenia,
 // słownik wartości PL → wartość kanału i sprawdzenie z listą dozwolonych wartości (pola „restrictiv” eMAG).
 export const SOURCES = {
-  pole: 'pole produktu', pim: 'kolumna PIM', atrybut: 'atrybut produktu', wymiar: 'wymiar z produktu', tresc: 'Generator Treści',
+  tytul: 'tytuł zaakceptowany (Tytuły)', pole: 'pole produktu', pim: 'kolumna PIM', atrybut: 'atrybut produktu', wymiar: 'wymiar z produktu', tresc: 'Generator Treści',
   zdjecie: 'zdjęcie', rodzina: 'rodzina wariantów', stala: 'stała wartość', cena: 'cena z Baselinkera', stan: 'stan z Baselinkera', ai: 'dobór AI z listy', pomin: 'pomiń',
 }
 export const PRODUCT_FIELDS = { sku: 'SKU', ean: 'EAN', name: 'nazwa (PIM)', baselinker_product_id: 'ID produktu w Baselinkerze', color: 'kolor (PIM)', shape: 'kształt (PIM)', category: 'kategoria (PIM)', model: 'model (PIM)' }
@@ -37,6 +37,11 @@ function raw(rule, field, ctx) {
 // Wartość pola dla produktu: { value, status, note }
 export function computeField(rule, field, ctx) {
   if (!rule || rule.source === 'pomin') return { value: '', status: field.mandatory ? 'brak' : 'ok', note: field.mandatory ? 'pole obowiązkowe bez reguły' : null, skip: !field.mandatory }
+  if (rule.source === 'tytul') {
+    const t = ctx.title
+    if (t?.status === 'zaakceptowany') return computeField({ source: 'stala', config: { value: t.title } }, field, ctx)
+    return { value: '', status: field.mandatory ? 'brak' : 'ok', note: t ? 'tytuł czeka na akceptację (Tytuły)' : 'brak tytułu – wygeneruj go w zakładce Tytuły' }
+  }
   if (PENDING.includes(rule.source)) return { value: '', status: 'brak', note: rule.source === 'ai' ? 'dobór AI – kolejny krok' : 'z Baselinkera – kolejny krok' }
   const c = rule.config || {}
   let v = raw(rule, field, ctx); v = v === null || v === undefined ? '' : String(v).trim()
@@ -73,7 +78,7 @@ export function defaultRules(fields, s = {}) {
     sale_price: ['cena', {}], original_sale_price: ['pomin', {}], vat_rate: ['stala', { value: s.vat ?? '0.23' }], status: ['stala', { value: '1' }],
     offer_currency: ['stala', { value: s.currency || 'HUF' }], stock: ['stan', {}], handling_time: ['stala', { value: '3' }], lead_time: ['pomin', {}],
     warranty: ['stala', { value: '24' }], offer_properties: ['pomin', {}], min_sale_price: ['cena', { kind: 'min' }], max_sale_price: ['cena', { kind: 'max' }],
-    name: ['tresc', { field: 'TITLE' }], brand: ['stala', { value: s.brand || 'Aedler' }], description: ['tresc', { field: 'HTML' }], url: ['pomin', {}],
+    name: ['tytul', {}], brand: ['stala', { value: s.brand || 'Aedler' }], description: ['tresc', { field: 'HTML' }], url: ['pomin', {}],
     source_language: ['stala', { value: s.language || 'Maghiara (hu_HU)' }],
     main_image_url: ['zdjecie', { index: 1 }], other_image_url1: ['zdjecie', { index: 2 }], other_image_url2: ['zdjecie', { index: 3 }], other_image_url3: ['zdjecie', { index: 4 }], other_image_url4: ['zdjecie', { index: 5 }], other_image_url5: ['zdjecie', { index: 6 }],
     family_id: ['rodzina', { key: 'id' }], family_name: ['rodzina', { key: 'name' }], family_type: ['stala', { value: 'Lungime (hidden) - Latime (hidden) [1721]' }],

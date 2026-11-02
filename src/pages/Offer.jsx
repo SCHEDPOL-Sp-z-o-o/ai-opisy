@@ -133,24 +133,25 @@ export default function Offer({ profile }) {
       const base = { templates, channels: (ch.data || []).map(c => ({ ...c, label: `${c.marketplace} ${c.language.toUpperCase()}` })), brands: br.data || [] }
       const tpl = templates.find(x => x.id === id)
       if (!tpl) { setD({ ...base, tpl: null }); return }
-      const [rules, vals, fams, prods, pim, descs] = await Promise.all([
+      const [rules, vals, fams, prods, pim, descs, titles] = await Promise.all([
         supabase.from('offer_rules').select('code, source, config').eq('template_id', id),
         fetchAll('offer_values', 'product_id, code, value, origin, status, note', x => x.eq('template_id', id)),
         supabase.from('product_families').select('id, model_name, category, brand_id, series'),
         fetchAll('products', 'id, sku, ean, name, family_id, attributes, images, image_url, baselinker_product_id'),
         fetchAll('assortment', 'sku, raw, color, shape, category, model, category_path'),
         tpl.channel_id ? fetchAll('descriptions', 'product_id, family_id, fields, html, version, status', x => x.eq('channel_id', tpl.channel_id).order('version', { ascending: false })) : Promise.resolve([]),
+        tpl.channel_id ? fetchAll('product_titles', 'product_id, title, status', x => x.eq('channel_id', tpl.channel_id)).catch(() => []) : Promise.resolve([]),
       ])
       const famById = Object.fromEntries((fams.data || []).map(f => [f.id, f]))
       const products = prods.filter(p => !tpl.brand_id || famById[p.family_id]?.brand_id === tpl.brand_id).sort((a, b) => a.sku.localeCompare(b.sku))
       const pimBySku = Object.fromEntries(pim.map(r => [r.sku, r])), descBy = {}
       for (const x of descs) if (x.product_id && !descBy[x.product_id]) descBy[x.product_id] = x
       const values = {}; for (const v of vals) (values[v.product_id] = values[v.product_id] || {})[v.code] = v
-      setD({ ...base, tpl, rules: rules.data || [], products, famById, pimBySku, descBy, values })
+      setD({ ...base, tpl, rules: rules.data || [], products, famById, pimBySku, descBy, values, titleBy: Object.fromEntries(titles.map(t => [t.product_id, t])) })
     } catch (e) { setErr(/channel_templates/.test(e.message) ? 'Brak tabel modułu – uruchom migrację 43_oferta_kanaly.sql.' : plError(e.message)) }
   }
   useEffect(() => { load() }, [])
-  const ctxOf = p => ({ product: p, pim: d.pimBySku[p.sku] || {}, family: d.famById[p.family_id], desc: d.descBy[p.id] })
+  const ctxOf = p => ({ product: p, pim: d.pimBySku[p.sku] || {}, family: d.famById[p.family_id], desc: d.descBy[p.id], title: d.titleBy?.[p.id] })
   const R = useMemo(() => d?.rules ? Object.fromEntries(d.rules.map(r => [r.code, r])) : {}, [d])
 
   if (err) return <section className="page"><h1>Oferta i kanały</h1><p className="error">{err}</p></section>

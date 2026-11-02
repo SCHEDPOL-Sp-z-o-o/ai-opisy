@@ -9,6 +9,8 @@ export const PUBLISH_URL = N8N_URL.replace('ai-opisy-zadania', 'ai-opisy-publika
 export const DATA_URL = N8N_URL.replace('ai-opisy-zadania', 'studio-dane')
 // Pozyskiwanie klientów – osobny workflow (research, kwalifikacja, przekazanie do ClickUp)
 export const LEADS_URL = N8N_URL.replace('ai-opisy-zadania', 'studio-pozyskiwanie')
+// Tytuły produktów – osobny workflow
+export const TITLES_URL = N8N_URL.replace('ai-opisy-zadania', 'studio-tytuly')
 
 // Aktywne zadania AI/n8n – logo w menu i nakładka na środku ekranu pokazują, że coś się dzieje
 export const jobActivity = new EventTarget()
@@ -41,7 +43,7 @@ async function runJobInner(jobType, payload, { onStage, timeoutSec = 120, url = 
     })
   } catch {
     await supabase.from('jobs').update({ status: 'blad', error: 'Brak połączenia z n8n' }).eq('id', jobId).eq('status', 'w_kolejce')
-    throw new Error(url === N8N_URL ? 'Brak połączenia z n8n. Sprawdź, czy workflow jest włączony.' : url === DATA_URL ? 'Brak połączenia z workflow „Studio – dane rynkowe”. Sprawdź w n8n, czy jest zaimportowany i włączony.' : url === LEADS_URL ? 'Brak połączenia z workflow „Studio – pozyskiwanie”. Sprawdź w n8n, czy jest zaimportowany i włączony.' : 'Brak połączenia z workflow publikacji. Sprawdź, czy „AI Opisy – publikacja” jest włączony.')
+    throw new Error(url === N8N_URL ? 'Brak połączenia z n8n. Sprawdź, czy workflow jest włączony.' : url === DATA_URL ? 'Brak połączenia z workflow „Studio – dane rynkowe”. Sprawdź w n8n, czy jest zaimportowany i włączony.' : url === LEADS_URL ? 'Brak połączenia z workflow „Studio – pozyskiwanie”. Sprawdź w n8n, czy jest zaimportowany i włączony.' : url === TITLES_URL ? 'Brak połączenia z workflow „Studio – tytuły”. Sprawdź w n8n, czy jest zaimportowany i włączony.' : 'Brak połączenia z workflow publikacji. Sprawdź, czy „AI Opisy – publikacja” jest włączony.')
   }
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {

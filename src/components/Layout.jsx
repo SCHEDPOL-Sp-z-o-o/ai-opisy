@@ -11,7 +11,7 @@ import { supabase, ROLE_LABELS } from '../supabase.js'
 const GROUPS = [
   { label: 'Start', items: [{ to: '/tresci', label: 'Dashboard' }] },
   { label: 'Produkty', items: [{ to: '/drzewo', label: 'Drzewo produktów' }, { to: '/produkty', label: 'Produkty' }] },
-  { label: 'Przygotowanie treści', items: [{ to: '/wiedza', label: 'Księga wiedzy' }, { to: '/frazy', label: 'Frazy kluczowe' }, { to: '/szablony', label: 'Szablony' }, { to: '/biblioteka', label: 'Biblioteka grafik' }, { to: '/grafiki', label: 'Grafiki na FTP' }] },
+  { label: 'Przygotowanie treści', items: [{ to: '/wiedza', label: 'Księga wiedzy' }, { to: '/frazy', label: 'Frazy kluczowe' }, { to: '/szablony', label: 'Szablony' }, { to: '/tytuly', label: 'Tytuły' }, { to: '/biblioteka', label: 'Biblioteka grafik' }, { to: '/grafiki', label: 'Grafiki na FTP' }] },
   { label: 'Kontrola i publikacja', items: [{ to: '/weryfikacja', label: 'Weryfikacja', badge: 'review' }, { to: '/nauka', label: 'Nauka z uwag', badge: 'learn' }, { to: '/publikacja', label: 'Publikacja' }, { to: '/parametry', label: 'Parametry Base' }] },
   { label: 'Konfiguracja', items: [{ to: '/slownik', label: 'Słownik importu', admin: true }, { to: '/reguly', label: 'Reguły QA' }] },
 ]
