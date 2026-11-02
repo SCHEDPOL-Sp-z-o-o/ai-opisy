@@ -16,6 +16,9 @@ function useLookups() {
   return l
 }
 
+// Style zaznaczania i masowego usuwania (w pliku strony – aktualizacja nie wymaga zmiany styles.css)
+const BULK_CSS = `.check-cell{width:34px;text-align:center}.check-cell input{width:17px;height:17px;cursor:pointer}tr.row-selected td{background:#FFF8F7}.desc-bulk{gap:14px;align-items:center}.fact-tools{padding:12px 14px}.danger-btn{color:#B42318;border-color:#F1C4BF}`
+
 const opisow = n => `${n} ${n === 1 ? 'opis' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? 'opisy' : 'opisów'}`
 
 function ReviewList({ profile }) {
@@ -71,6 +74,7 @@ function ReviewList({ profile }) {
   const pl = selShown.length ? plan() : null
   return (
     <section className="page">
+      <style>{BULK_CSS}</style>
       <h1>Weryfikacja</h1>
       <div className="tabs" role="tablist">
         {FILTERS.map(([k, l]) => <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'tab on' : 'tab'} onClick={() => setFilter(k)}>{l}
