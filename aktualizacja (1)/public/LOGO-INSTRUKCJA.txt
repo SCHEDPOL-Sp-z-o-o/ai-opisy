@@ -1,0 +1,5 @@
+Logo na ekranie logowania:
+- wgraj tu plik schedpol-logo.svg (zalecane) albo schedpol-logo.png
+- wersja jasna (biała) – tło ekranu logowania jest ciemnogranatowe
+- wysokość wyświetlania: 44 px (na telefonie 36 px), szerokość maks. 220 px
+Bez pliku na ekranie logowania wyświetla się nazwa „Schedpol” tekstem.
