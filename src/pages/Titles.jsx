@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, plError, fetchAll } from '../supabase.js'
 import { runJob, TITLES_URL } from '../jobs.js'
-import { COMPONENTS, DEFAULT_COMPONENTS, LANG_LABEL, titleFacts, templateFor, previewTitle } from '../titles.js'
+import { COMPONENTS, DEFAULT_COMPONENTS, LANG_LABEL, titleFacts, templateFor, previewTitle, withAllComponents } from '../titles.js'
 import DrainLoader from '../components/DrainLoader.jsx'
 
 // Tytuły produktów: szablon dla kanału i kategorii → generowanie AI w języku kanału (+ tłumaczenie PL) → edycja → akceptacja.
@@ -11,7 +11,7 @@ const LBL = Object.fromEntries(COMPONENTS.map(c => [c.key, c.label]))
 const plN = (n, a, b, c) => `${n} ${n === 1 ? a : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? b : c}`
 
 function TemplateEditor({ channel, tpl, categories, sampleFor, onSaved, onCancel, setMsg }) {
-  const [t, setT] = useState(() => tpl || { channel_id: channel.id, category: '', max_len: 120, separator: ' ', rules: '', components: DEFAULT_COMPONENTS })
+  const [t, setT] = useState(() => tpl ? { ...tpl, components: withAllComponents(tpl.components) } : { channel_id: channel.id, category: '', max_len: 120, separator: ' ', rules: '', components: DEFAULT_COMPONENTS })
   const move = (i, d) => setT(x => { const c = [...x.components]; const j = i + d; if (j < 0 || j >= c.length) return x; [c[i], c[j]] = [c[j], c[i]]; return { ...x, components: c } })
   const setC = (i, patch) => setT(x => ({ ...x, components: x.components.map((c, k) => k === i ? { ...c, ...patch } : c) }))
   const sample = sampleFor(t.category), prev = sample ? previewTitle(t, sample) : ''
@@ -56,18 +56,19 @@ export default function Titles({ profile }) {
 
   async function load() {
     try {
-      const [ch, tt, pt, prods, fams, br, pim] = await Promise.all([
+      const [ch, tt, pt, prods, fams, br, pim, kb] = await Promise.all([
         supabase.from('channels').select('id, marketplace, language, active').order('code'),
         supabase.from('title_templates').select('*'),
         fetchAll('product_titles', '*'),
         fetchAll('products', 'id, sku, name, family_id, attributes'),
-        supabase.from('product_families').select('id, model_name, series, category, brand_id'),
+        supabase.from('product_families').select('id, model_name, series, category, brand_id, technologies'),
         supabase.from('brands').select('id, name'),
         fetchAll('assortment', 'sku, color, technology, model'),
+        fetchAll('kb_facts', 'content, level, brand_id, category, technology, family_id, product_id, color, status', x => x.eq('status', 'zatwierdzony')).catch(() => []),
       ])
       if (tt.error) throw tt.error
       const chans = (ch.data || []).filter(c => c.active !== false)
-      setD({ channels: chans, templates: tt.data, titles: Object.fromEntries(pt.map(x => [`${x.channel_id}|${x.product_id}`, x])), products: prods.sort((a, b) => a.sku.localeCompare(b.sku)),
+      setD({ kb, families: fams.data || [], channels: chans, templates: tt.data, titles: Object.fromEntries(pt.map(x => [`${x.channel_id}|${x.product_id}`, x])), products: prods.sort((a, b) => a.sku.localeCompare(b.sku)),
         fam: Object.fromEntries((fams.data || []).map(f => [f.id, f])), brand: Object.fromEntries((br.data || []).map(b => [b.id, b.name])), pim: Object.fromEntries(pim.map(r => [r.sku, r])) })
       setChId(c => c || chans[0]?.id || '')
     } catch (e) { setErr(/title_templates|product_titles/.test(e.message) ? 'Brak tabel generatora tytułów – uruchom migrację 44_tytuly.sql.' : plError(e.message)) }
@@ -77,7 +78,7 @@ export default function Titles({ profile }) {
   if (err) return <section className="page"><h1>Tytuły</h1><p className="error">{err}</p></section>
   if (!d) return <section className="page"><DrainLoader /></section>
   const ch = d.channels.find(c => c.id === chId)
-  const factsOf = p => { const f = d.fam[p.family_id] || {}; return titleFacts({ product: p, family: f, pim: d.pim[p.sku] || {}, brand: d.brand[f.brand_id] || '' }) }
+  const factsOf = p => { const f = d.fam[p.family_id] || {}; return titleFacts({ product: p, family: f, families: d.families, pim: d.pim[p.sku] || {}, brand: d.brand[f.brand_id] || '', kb: d.kb }) }
   const tplOf = p => templateFor(d.templates, chId, d.fam[p.family_id]?.category)
   const tOf = p => d.titles[`${chId}|${p.id}`]
   const ql = q.trim().toLowerCase()
@@ -104,7 +105,7 @@ export default function Titles({ profile }) {
         setBusy(`Generowanie tytułów… ${done + part.length}/${selShown.length}`)
         const r = await runJob('generate_titles', { mode: 'generate', channel: { marketplace: ch.marketplace, language: ch.language }, template: { components: t.components, max_len: t.max_len, separator: t.separator, rules: t.rules },
           items: part.map(p => ({ product_id: p.id, sku: p.sku, facts: factsOf(p) })) }, { url: TITLES_URL, timeoutSec: 400 })
-        const rows = (r.titles || []).filter(x => x.title).map(x => ({ product_id: x.product_id, channel_id: chId, template_id: t.id, title: x.title, title_pl: isPl ? x.title : x.title_pl || null, pl_stale: false, parts: { used: x.used || [] }, status: 'do_akceptacji', note: x.over ? `za długi: ${x.length}/${t.max_len} znaków` : null, created_by: session.user.id }))
+        const rows = (r.titles || []).filter(x => x.title).map(x => ({ product_id: x.product_id, channel_id: chId, template_id: t.id, title: x.title, title_pl: isPl ? x.title : x.title_pl || null, pl_stale: false, parts: { used: x.used || [], dropped: x.dropped || [], parts: x.parts || {} }, status: 'do_akceptacji', note: x.over ? `za długi: ${x.length}/${t.max_len} znaków` : x.dropped?.length ? `skrócono do limitu – pominięto: ${x.dropped.map(k => (COMPONENTS.find(c => c.key === k)?.label || k).toLowerCase()).join(', ')}` : null, created_by: session.user.id }))
         if (rows.length) { const { error } = await supabase.from('product_titles').upsert(rows, { onConflict: 'product_id,channel_id' }); if (error) throw error }
         done += part.length; over += rows.filter(x => x.note).length; missing += (r.missing || []).length
       }
@@ -152,7 +153,7 @@ export default function Titles({ profile }) {
       {tab === 'szablony' && ch && <div className="panel">
         <p className="muted small">Język tytułów: <strong>{LANG_LABEL[ch.language] || ch.language}</strong>. Szablon określa kolejność składników, limit znaków i zasady stylu; puste pole kategorii = szablon domyślny dla całego kanału.</p>
         {chTpls.length > 0 && <table className="compact"><thead><tr><th>Kategoria</th><th>Składniki</th><th>Limit</th><th /></tr></thead>
-          <tbody>{chTpls.map(t => <tr key={t.id}><td><strong>{t.category || 'wszystkie kategorie'}</strong></td><td className="small">{t.components.filter(c => c.on).map(c => LBL[c.key]).join(' · ')}</td><td>{t.max_len}</td>
+          <tbody>{chTpls.map(t => <tr key={t.id}><td><strong>{t.category || 'wszystkie kategorie'}</strong></td><td className="small">{t.components.filter(c => c.on).map(c => LBL[c.key] || c.key).join(' · ')}</td><td>{t.max_len}</td>
             <td><button className="link-dark small" onClick={() => setEdit(t)}>edytuj</button> {canApprove && <button className="link-dark danger-link small" onClick={async () => { if (confirm('Usunąć szablon? Wygenerowane tytuły zostają.')) { await supabase.from('title_templates').delete().eq('id', t.id); load() } }}>usuń</button>}</td></tr>)}</tbody></table>}
         {!edit && <div className="row-actions"><button className="btn ghost" onClick={() => setEdit('new')}>+ Nowy szablon</button></div>}
         {edit && <TemplateEditor key={edit === 'new' ? 'new' : edit.id} channel={ch} tpl={edit === 'new' ? null : edit} categories={categories} sampleFor={sampleFor} onSaved={() => { setEdit(null); load() }} onCancel={() => setEdit(null)} setMsg={setMsg} />}
@@ -182,7 +183,7 @@ export default function Titles({ profile }) {
               <td className="tt-cell">{t ? <>
                 <input className="tt-input" value={draft ?? t.title} onChange={e => setDrafts(x => ({ ...x, [p.id]: e.target.value }))} onBlur={e => saveTitle(p, e.target.value)} onKeyDown={e => e.key === 'Enter' && e.target.blur()} aria-label="Tytuł" />
                 {!isPl && <div className={'small ' + (t.pl_stale ? 'warn-text' : 'muted')}>PL: {t.title_pl || '—'}{t.pl_stale && <> · tytuł zmieniony – <button className="link-dark small" onClick={() => translate([p])}>przetłumacz ponownie</button></>}</div>}
-                {t.note && <div className="small crit-text">{t.note}</div>}</> : <span className="muted small">brak tytułu{tpl ? '' : ' i szablonu'}</span>}</td>
+                {t.note && <div className={'small ' + (t.note.startsWith('za długi') ? 'crit-text' : 'muted')}>{t.note}</div>}</> : <span className="muted small">brak tytułu{tpl ? '' : ' i szablonu'}</span>}</td>
               <td className={max && len > max ? 'crit-text' : 'muted'}>{t ? `${len}${max ? '/' + max : ''}` : ''}</td>
               <td>{t && <span className={`tag ${t.status === 'zaakceptowany' ? 'okt' : t.status === 'odrzucony' ? 'err' : 'warn'}`}>{STATUS[t.status]}</span>}</td>
               <td className="tt-act">{t && canApprove && t.status !== 'zaakceptowany' && <button className="link-dark small" onClick={() => setStatus([p], 'zaakceptowany')}>akceptuj</button>} {t && canApprove && t.status !== 'odrzucony' && <button className="link-dark danger-link small" onClick={() => setStatus([p], 'odrzucony')}>odrzuć</button>}</td>
