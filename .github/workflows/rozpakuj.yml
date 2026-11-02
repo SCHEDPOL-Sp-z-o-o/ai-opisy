@@ -1,0 +1,53 @@
+name: Rozpakuj aktualizacje
+
+# Wgraj do glownego katalogu repozytorium JEDEN plik: aktualizacja.zip (pelna paczka aplikacji).
+# Nazwa moze miec dopisek przegladarki, np. „aktualizacja (1).zip” – tez zadziala.
+# Automat rozpakuje go, podmieni src, public, package.json, package-lock.json, usunie zip i uruchomi wdrozenie.
+on:
+  push:
+    branches: [main]
+    paths: ['aktualizacja*.zip']
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: aktualizacja
+  cancel-in-progress: false
+
+jobs:
+  rozpakuj:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rozpakuj paczke i podmien pliki aplikacji
+        run: |
+          set -e
+          ZIP=$(ls -t aktualizacja*.zip 2>/dev/null | head -1 || true)
+          if [ -z "$ZIP" ]; then echo "Brak pliku aktualizacja.zip – nic do zrobienia"; exit 0; fi
+          echo "Paczka: $ZIP"
+          rm -rf /tmp/akt && mkdir -p /tmp/akt && unzip -o -q "$ZIP" -d /tmp/akt
+          ROOT=/tmp/akt
+          # paczka moze miec pliki w katalogu glownym albo w jednym podfolderze
+          if [ ! -d "$ROOT/src" ] && [ "$(ls -1 "$ROOT" | wc -l)" -eq 1 ]; then ROOT="$ROOT/$(ls -1 "$ROOT")"; fi
+          if [ ! -d "$ROOT/src" ]; then echo "::error::W paczce nie ma folderu src – to nie jest pelna paczka aplikacji"; exit 1; fi
+          # pelna podmiana src (usuwa tez stare smieci, np. „version (1).js”)
+          rm -rf src && cp -r "$ROOT/src" src
+          for x in public package.json package-lock.json index.html vite.config.js; do
+            if [ -e "$ROOT/$x" ]; then rm -rf "$x"; cp -r "$ROOT/$x" "$x"; fi
+          done
+          for z in aktualizacja*.zip; do git rm -q --cached "$z" || true; rm -f "$z"; done
+          VER=$(grep -o "'[0-9][0-9.-]*'" src/version.js | tr -d "'" || echo "?")
+          git config user.name "aktualizacja-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Aktualizacja aplikacji do wersji $VER (z paczki aktualizacja.zip)"
+          git push
+          echo "### Zaktualizowano do wersji $VER" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Uruchom wdrozenie
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref main
