@@ -1,7 +1,7 @@
 // Renderer opisu HTML sterowany szablonem (kolejność sekcji, obrazki, style).
 // Ten sam kod działa w aplikacji (podgląd) i w n8n (generacja) – nie zmieniaj jednego bez drugiego.
 export const DEFAULT_ASSET_BASE = 'https://schedpol.nazwa.pl/AEDLER/'
-export const DEFAULT_STYLES = { asset_base: DEFAULT_ASSET_BASE, max_width: 920, font_size: 15, line_height: 1.6, text_color: '#333333', heading_color: '#0D1B3E', accent_color: '#1E4D9B', h1_size: 26, h2_size: 22, hero_tag: 'h1' }
+export const DEFAULT_STYLES = { asset_base: DEFAULT_ASSET_BASE, max_width: 920, font_size: 15, line_height: 1.6, text_color: '#333333', heading_color: '#0D1B3E', accent_color: '#1E4D9B', h1_size: 26, h2_size: 22, hero_tag: 'h1', hero_align: 'left', faq_style: 'numbered' }
 
 // === RENDER START === (blok kopiowany 1:1 do n8n – węzły „GEN: QA i HTML” i „VAR: QA i HTML”)
 // Formaty wyjściowe: standard (bogaty HTML eMAG), custom (własny szkielet HTML z polami {{…}}); oba przechodzą przez filtr dozwolonych znaczników.
@@ -75,6 +75,24 @@ function rdContext(fields, template, images) {
   return ctx
 }
 
+// Specyfikacja techniczna: wiersze z danych produktu ({label, value, num, unit}) – liczby wstawia program, AI tylko tłumaczy etykiety i teksty.
+// Zwraca liczby specyfikacji (dla kontroli jakości „liczby spoza faktów”).
+function applySpecRows(fields, template, rows, lang) {
+  const fmt = n => { const x = Number(n); const t = Number.isInteger(x) ? String(x) : String(Math.round(x * 100) / 100); return lang === 'en' ? t : t.replace('.', ',') }
+  const used = []
+  for (const sec of (template?.sections || []).filter(s => s && s.enabled !== false && s.type === 'specs')) {
+    const k = sec.key, list = (rows || []).slice(0, 12)
+    for (let i = 1; i <= 12; i++) {
+      const r = list[i - 1]
+      if (!r) { delete fields[`${k}_L${i}`]; delete fields[`${k}_V${i}`]; continue }
+      if (!String(fields[`${k}_L${i}`] || '').trim()) fields[`${k}_L${i}`] = r.label
+      if (r.num !== null && r.num !== undefined && r.num !== '') { fields[`${k}_V${i}`] = `${fmt(r.num)}${r.unit ? ' ' + r.unit : ''}`; used.push(String(r.num)) }
+      else { if (!String(fields[`${k}_V${i}`] || '').trim()) fields[`${k}_V${i}`] = r.value; (String(r.value).match(/\d+(?:[.,]\d+)?/g) || []).forEach(n => used.push(n.replace(',', '.'))) }
+    }
+  }
+  return used
+}
+
 function renderDescription(fields, template, images) {
   const out = rdOut(template)
   if (out.mode === 'custom' && out.html) return rdSanitize(rdMustache(out.html, rdContext(fields, template, images)), out)
@@ -87,13 +105,54 @@ function renderDescription(fields, template, images) {
   const hr = '<hr style="border: none; margin: 32px auto">'
   const h2 = (text, bottom) => `<h2 style="font-size: ${st.h2_size}px; color: ${st.heading_color}; margin: 0 0 ${bottom}px 0">${esc(text)}</h2>`
   const ht = st.hero_tag === 'h2' ? 'h2' : 'h1'
+  const LINE = '#E3E6EA'
+  // układ obraz–tekst na przemian (na telefonie kolumny zawijają się – zawsze obraz nad tekstem)
+  let splitN = 0
+  const split = (body, src, alt, tint) => {
+    const right = splitN++ % 2 === 1, pic = src ? `<img alt="${attr(alt)}" src="${attr(src)}" style="width: 100%; height: auto; border-radius: 4px; display: block">` : ''
+    const col = (inner, pad) => `<div style="flex: 1 1 300px; padding: ${pad}">${inner}</div>`
+    const txt = col(body, tint ? '18px 20px' : '0 10px 12px 10px'), img = pic ? col(pic, tint ? '18px 20px' : '0 10px 12px 10px') : ''
+    return `<div style="display: flex; flex-wrap: ${right ? 'wrap-reverse' : 'wrap'}; align-items: center; margin: 0 0 26px 0${tint ? '; background: #F5F7F9; border-radius: 4px' : ''}">${right ? txt + img : img + txt}</div>`
+  }
   let h = `<div style="max-width: ${st.max_width}px; margin: 0 auto; color: ${st.text_color}; font-size: ${st.font_size}px; line-height: ${st.line_height}">`
   for (const sec of (template?.sections || []).filter(s => s && s.enabled !== false)) {
     const k = sec.key
     if (sec.type === 'hero') {
       h += img(srcOf(sec), g('HERO_IMG_ALT'))
-      h += `<${ht} style="font-size: ${st.h1_size}px; color: ${st.heading_color}; margin: 0 0 10px 0">${esc(g('HERO_H1'))}</${ht}>`
-      if (g('HERO_LEAD')) h += `<p style="margin: 0 0 8px 0; font-size: 16px">${esc(g('HERO_LEAD'))}</p>`
+      const ctr = st.hero_align === 'center'
+      h += `<${ht} style="font-size: ${st.h1_size}px; line-height: 1.25; color: ${st.heading_color}; margin: ${ctr ? '22px 0 10px 0' : '0 0 10px 0'}${ctr ? '; text-align: center' : ''}">${esc(g('HERO_H1'))}</${ht}>`
+      if (g('HERO_LEAD')) h += `<p style="margin: 0 ${ctr ? 'auto 22px auto; max-width: 820px; text-align: center' : '0 8px 0; font-size: 16px'}">${esc(g('HERO_LEAD'))}</p>`
+    } else if (sec.type === 'features') {
+      const items = [1, 2, 3, 4, 5, 6].map(i => g(`${k}_${i}`)).filter(Boolean)
+      if (!items.length) continue
+      h += `<div style="display: flex; flex-wrap: wrap; border-top: 1px solid ${LINE}; border-bottom: 1px solid ${LINE}; padding: 10px 0; margin: 0 0 26px 0">`
+      h += items.map(t => `<div style="flex: 1 1 280px; padding: 8px 10px; display: flex; gap: 10px; align-items: center"><span style="color: ${st.accent_color}; font-size: 20px; font-weight: bold">✔</span><span>${esc(t)}</span></div>`).join('') + '</div>'
+    } else if (sec.type === 'benefits') {
+      const items = [1, 2, 3, 4, 5].map(i => ({ t: g(`${k}_T${i}`), d: g(`${k}_D${i}`) })).filter(x => x.t || x.d)
+      if (!items.length) continue
+      if (g(`${k}_H2`)) h += `<h2 style="font-size: ${st.h2_size}px; color: ${st.heading_color}; text-align: center; margin: 0 0 12px 0">${esc(g(`${k}_H2`))}</h2>`
+      h += `<ul style="margin: 0 auto 30px auto; max-width: 820px; padding-left: 20px">` + items.map(x => `<li style="margin: 0 0 6px 0">${x.t ? `<strong style="color: ${st.heading_color}">${esc(x.t)}</strong>` : ''}${x.t && x.d ? ' – ' : ''}${esc(x.d)}</li>`).join('') + '</ul>'
+    } else if (sec.type === 'kit') {
+      const items = [1, 2, 3, 4, 5, 6].map(i => g(`${k}_LI${i}`)).filter(Boolean)
+      if (!items.length) continue
+      const body = `${g(`${k}_H2`) ? `<h2 style="font-size: ${st.h2_size - 2}px; color: ${st.heading_color}; margin: 0 0 10px 0">${esc(g(`${k}_H2`))}</h2>` : ''}<ol style="margin: 0; padding: 0; list-style: none">`
+        + items.map((t, i) => `<li style="display: flex; gap: 10px; align-items: center; padding: 6px 0${i < items.length - 1 ? `; border-bottom: 1px solid ${LINE}` : ''}"><span style="flex: 0 0 24px; height: 24px; border-radius: 50%; background: ${st.heading_color}; color: #FFFFFF; font-size: 13px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center">${i + 1}</span>${esc(t)}</li>`).join('') + '</ol>'
+      h += split(body, srcOf(sec), g(`${k}_IMG_ALT`))
+    } else if (sec.type === 'specs') {
+      const rows = []; for (let i = 1; i <= 12; i++) { const l = g(`${k}_L${i}`), v = g(`${k}_V${i}`); if (l && v) rows.push([l, v]) }
+      if (!rows.length) continue
+      const body = `${g(`${k}_H2`) ? `<h2 style="font-size: ${st.h2_size - 2}px; color: ${st.heading_color}; margin: 0 0 10px 0">${esc(g(`${k}_H2`))}</h2>` : ''}<table style="width: 100%; border-collapse: collapse; font-size: 14px">`
+        + rows.map(([l, v], i) => { const b = i < rows.length - 1 ? `; border-bottom: 1px solid ${LINE}` : ''; return `<tr><td style="padding: 6px 8px; color: #5C6570${b}">${esc(l)}</td><td style="padding: 6px 8px; color: ${st.heading_color}; font-weight: bold${b}">${esc(v)}</td></tr>` }).join('') + '</table>'
+      h += split(body, srcOf(sec), g(`${k}_IMG_ALT`))
+    } else if (sec.type === 'content' && sec.layout === 'split') {
+      const lis = sec.list === false ? [] : [1, 2, 3, 4, 5].map(b => g(`${k}_LI${b}`)).filter(Boolean)
+      const H2 = g(`${k}_H2`), P = g(`${k}_P`), PB = sec.bold === false ? '' : g(`${k}_P_BOLD`)
+      if (!H2 && !P && !PB && !lis.length) continue
+      let body = H2 ? `<h2 style="font-size: ${st.h2_size - 2}px; color: ${st.heading_color}; margin: 0 0 8px 0">${esc(H2)}</h2>` : ''
+      if (P) body += `<p style="margin: 0${PB || lis.length ? ' 0 8px 0' : ''}">${esc(P)}</p>`
+      if (lis.length) body += `<ul style="margin: 0${PB ? ' 0 8px 0' : ''}; padding-left: 18px">` + lis.map(l => `<li>${esc(l)}</li>`).join('') + '</ul>'
+      if (PB) body += `<p style="margin: 0"><strong style="color: ${st.heading_color}">${esc(PB)}</strong></p>`
+      h += split(body, srcOf(sec), g(`${k}_IMG_ALT`), !!sec.tint)
     } else if (sec.type === 'content') {
       const lis = sec.list === false ? [] : [1, 2, 3, 4, 5].map(b => g(`${k}_LI${b}`)).filter(Boolean)
       const H2 = g(`${k}_H2`), P = g(`${k}_P`), PB = sec.bold === false ? '' : g(`${k}_P_BOLD`), AK = sec.accent ? g(`${k}_AKCENT`) : ''
@@ -106,6 +165,11 @@ function renderDescription(fields, template, images) {
     } else if (sec.type === 'faq') {
       const qs = [1, 2, 3, 4, 5, 6].slice(0, sec.max_questions || 6).map(i => ({ q: g(`FAQ_Q${i}`), a: g(`FAQ_A${i}`) })).filter(x => x.q && x.a)
       if (!qs.length) continue
+      if (st.faq_style === 'bordered') {
+        h += `<h2 style="font-size: ${st.h2_size}px; color: ${st.heading_color}; margin: 0 0 12px 0">${esc(g('FAQ_H2'))}</h2><div style="border-top: 1px solid ${LINE}">`
+          + qs.map(x => `<div style="padding: 10px 0; border-bottom: 1px solid ${LINE}"><p style="margin: 0 0 4px 0; color: ${st.heading_color}"><strong>${esc(x.q)}</strong></p><p style="margin: 0">${esc(x.a)}</p></div>`).join('') + '</div>'
+        continue
+      }
       h += hr + '<div>' + h2(g('FAQ_H2'), 16)
       qs.forEach((x, i) => {
         h += `<p style="margin: 0 0 4px 0; color: ${st.heading_color}"><strong>${i + 1}. ${esc(x.q)}</strong></p><p style="${i === qs.length - 1 ? 'margin: 0' : 'margin: 0 0 14px 0'}">${esc(x.a)}</p>`
@@ -118,7 +182,7 @@ function renderDescription(fields, template, images) {
   return needsFilter ? rdSanitize(h, out) : h
 }
 // === RENDER END ===
-export { renderDescription, rdMustache, rdSanitize, rdContext }
+export { renderDescription, rdMustache, rdSanitize, rdContext, applySpecRows }
 
 // Gotowe formaty wyjściowe do wyboru w edytorze szablonów
 export const OUTPUT_PRESETS = {
@@ -147,10 +211,14 @@ export function templateFields(template) {
       keys.push(`${sec.key}_H2`, `${sec.key}_P`)
       if (sec.bold !== false) keys.push(`${sec.key}_P_BOLD`)
       if (sec.list !== false) keys.push(...[1, 2, 3, 4, 5].map(b => `${sec.key}_LI${b}`))
-      if (sec.accent) keys.push(`${sec.key}_AKCENT`)
+      if (sec.accent && sec.layout !== 'split') keys.push(`${sec.key}_AKCENT`)
       if (hasImage(sec)) keys.push(`${sec.key}_IMG_ALT`)
     }
     if (sec.type === 'faq') { keys.push('FAQ_H2'); for (let i = 1; i <= (sec.max_questions || 6); i++) keys.push(`FAQ_Q${i}`, `FAQ_A${i}`) }
+    if (sec.type === 'features') keys.push(...[1, 2, 3, 4, 5, 6].map(i => `${sec.key}_${i}`))
+    if (sec.type === 'benefits') { keys.push(`${sec.key}_H2`); for (let i = 1; i <= 5; i++) keys.push(`${sec.key}_T${i}`, `${sec.key}_D${i}`) }
+    if (sec.type === 'kit') { keys.push(`${sec.key}_H2`, ...[1, 2, 3, 4, 5, 6].map(i => `${sec.key}_LI${i}`)); if (hasImage(sec)) keys.push(`${sec.key}_IMG_ALT`) }
+    if (sec.type === 'specs') { keys.push(`${sec.key}_H2`); if (hasImage(sec)) keys.push(`${sec.key}_IMG_ALT`) }   // wiersze: z danych produktu (applySpecRows)
   }
   return keys
 }

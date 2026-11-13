@@ -1,10 +1,12 @@
+import { TEMPLATE_FIELDS } from './productDataSpec.js'
 // Reguły pól oferty kanału: skąd wartość (PIM, pole produktu, atrybut, wymiar, treść, zdjęcie, rodzina, stała) + przekształcenia,
 // słownik wartości PL → wartość kanału i sprawdzenie z listą dozwolonych wartości (pola „restrictiv” eMAG).
 export const SOURCES = {
-  tytul: 'tytuł zaakceptowany (Tytuły)', pole: 'pole produktu', pim: 'kolumna PIM', atrybut: 'atrybut produktu', wymiar: 'wymiar z produktu', tresc: 'Generator Treści',
+  tytul: 'tytuł zaakceptowany (Tytuły)', szablon: 'pole z szablonu danych', pole: 'pole produktu', pim: 'kolumna PIM', atrybut: 'atrybut produktu', wymiar: 'wymiar z produktu', tresc: 'Generator Treści',
   zdjecie: 'zdjęcie', rodzina: 'rodzina wariantów', stala: 'stała wartość', cena: 'cena z Baselinkera', stan: 'stan z Baselinkera', ai: 'dobór AI z listy', pomin: 'pomiń',
 }
 export const PRODUCT_FIELDS = { sku: 'SKU', ean: 'EAN', name: 'nazwa (PIM)', baselinker_product_id: 'ID produktu w Baselinkerze', color: 'kolor (PIM)', shape: 'kształt (PIM)', category: 'kategoria (PIM)', model: 'model (PIM)' }
+export const DATA_FIELDS = TEMPLATE_FIELDS.map(f => f.name)
 export const ATTR_KEYS = ['wykonczenie', 'ksztalt', 'odplyw', 'powloka', 'w_zestawie', 'wymiar', 'wysokosc_cm', 'material']
 export const PENDING = ['cena', 'stan', 'ai']   // uzupełniane w kolejnym kroku (n8n: Baselinker, AI)
 
@@ -20,6 +22,7 @@ function raw(rule, field, ctx) {
   switch (rule.source) {
     case 'pole': return ['color', 'shape', 'category', 'model'].includes(c.key) ? pim[c.key] : (p[c.key] ?? pim[c.key])
     case 'pim': return Array.isArray(pim.raw) && c.col ? pim.raw[Number(c.col) - 1] : ''
+    case 'szablon': return pim.data?.[c.key] ?? ''
     case 'atrybut': return p.attributes?.[c.key] ?? ''
     case 'wymiar': {
       if (c.part === 'h') return p.attributes?.wysokosc_cm ?? dims(p.attributes?.wymiar || p.name)[2] ?? ''
@@ -77,21 +80,21 @@ export function defaultRules(fields, s = {}) {
     part_number: ['pole', { key: 'sku' }], vendor_ext_id: ['pole', { key: 'baselinker_product_id' }], ean: ['pole', { key: 'ean' }],
     sale_price: ['cena', {}], original_sale_price: ['pomin', {}], vat_rate: ['stala', { value: s.vat ?? '0.23' }], status: ['stala', { value: '1' }],
     offer_currency: ['stala', { value: s.currency || 'HUF' }], stock: ['stan', {}], handling_time: ['stala', { value: '3' }], lead_time: ['pomin', {}],
-    warranty: ['stala', { value: '24' }], offer_properties: ['pomin', {}], min_sale_price: ['cena', { kind: 'min' }], max_sale_price: ['cena', { kind: 'max' }],
+    warranty: ['szablon', { key: 'Gwarancja [lata]', factor: 12, decimals: 0 }],   // eMAG: miesiące offer_properties: ['pomin', {}], min_sale_price: ['cena', { kind: 'min' }], max_sale_price: ['cena', { kind: 'max' }],
     name: ['tytul', {}], brand: ['stala', { value: s.brand || 'Aedler' }], description: ['tresc', { field: 'HTML' }], url: ['pomin', {}],
     source_language: ['stala', { value: s.language || 'Maghiara (hu_HU)' }],
     main_image_url: ['zdjecie', { index: 1 }], other_image_url1: ['zdjecie', { index: 2 }], other_image_url2: ['zdjecie', { index: 3 }], other_image_url3: ['zdjecie', { index: 4 }], other_image_url4: ['zdjecie', { index: 5 }], other_image_url5: ['zdjecie', { index: 6 }],
     family_id: ['rodzina', { key: 'id' }], family_name: ['rodzina', { key: 'name' }], family_type: ['stala', { value: 'Lungime (hidden) - Latime (hidden) [1721]' }],
-    culoare: ['pole', { key: 'color', map: 'biały=Alb;bialy=Alb;white=Alb;biały połysk=Alb lucios;white glossy=Alb lucios;biały mat=Alb mat;white matt=Alb mat;czarny=Negru;black=Negru;czarny mat=Negru mat;black matt=Negru mat;szary=Gri;grey=Gri;antracyt=Gri antracit;anthracite=Gri antracit;beżowy=Bej;beige=Bej;kremowy=Crem', contains: false }],
+    culoare: ['szablon', { key: 'Kolor', map: 'biały=Alb;bialy=Alb;white=Alb;biały połysk=Alb lucios;white glossy=Alb lucios;biały mat=Alb mat;white matt=Alb mat;czarny=Negru;black=Negru;czarny mat=Negru mat;black matt=Negru mat;szary=Gri;grey=Gri;antracyt=Gri antracit;anthracite=Gri antracit;beżowy=Bej;beige=Bej;kremowy=Crem', contains: false }],
     tip: ['pole', { key: 'name', map: 'wolnostoj=Freestanding;freestanding=Freestanding;hydromasa=Cu hidromasaj', contains: true, fallback: 'Standard' }],
-    material: ['atrybut', { key: 'material', map: 'akryl=Acril;akrylowa=Acril;akrylowy=Acril;kompozyt=Compozit mineral;konglomerat=Compozit mineral;kompozyt mineralny=Compozit mineral;stal=Otel;stal emaliowana=Otel', contains: true }],
+    material: ['szablon', { key: 'Materiał', map: 'akryl=Acril;kompozyt mineralny=Compozit mineral;kompozyt=Compozit mineral;stal nierdzewna=Otel inoxidabil;styropian (EPS)=Polistiren', contains: true }],
     'continut pachet': ['pomin', {}],
-    inaltime: ['wymiar', { part: 'h', suffix: ' cm' }], latime: ['wymiar', { part: 2, suffix: ' cm' }], lungime: ['wymiar', { part: 1, suffix: ' cm' }],
-    greutate: ['pim', { col: '', suffix: ' Kg' }], 'caracteristici cheie': ['pomin', {}], volum: ['pim', { col: '', suffix: ' l' }],
-    forma: ['atrybut', { key: 'ksztalt', map: 'prostokatny=Dreptunghi;prostokątny=Dreptunghi;kwadratowy=Patrat;owalny=Oval;okragly=Rotund;okrągły=Rotund;polokragly=Semirotund;półokrągły=Semirotund;asymetryczny=Asimetric;pieciokatny=Pentagon;pięciokątny=Pentagon' }],
+    inaltime: ['szablon', { key: 'Wysokość [cm]', suffix: ' cm' }], latime: ['szablon', { key: 'Szerokość [cm]', suffix: ' cm' }], lungime: ['szablon', { key: 'Długość [cm]', suffix: ' cm' }],
+    greutate: ['szablon', { key: 'Waga netto [kg]', suffix: ' Kg' }], 'caracteristici cheie': ['pomin', {}], volum: ['szablon', { key: 'Pojemność [l]', suffix: ' l' }],
+    forma: ['szablon', { key: 'Kształt', map: 'prostokatny=Dreptunghi;prostokątny=Dreptunghi;kwadratowy=Patrat;owalny=Oval;okragly=Rotund;okrągły=Rotund;polokragly=Semirotund;półokrągły=Semirotund;asymetryczny=Asimetric;pieciokatny=Pentagon;pięciokątny=Pentagon' }],
     'pozitionare scurgere': ['ai', {}], 'pozitie montare': ['ai', {}],
-    safety_information: ['stala', { value: s.safety || '' }], manufacturer_name: ['stala', { value: s.manufacturer_name || 'Schedpol Sp. z o.o.' }],
-    manufacturer_address: ['stala', { value: s.manufacturer_address || '' }], manufacturer_email: ['stala', { value: s.manufacturer_email || '' }],
+    safety_information: ['stala', { value: s.safety || '' }], manufacturer_name: ['szablon', { key: 'Producent', fallback: 'Schedpol Sp. z o.o.' }],
+    manufacturer_address: ['szablon', { key: 'Adres producenta' }], manufacturer_email: ['szablon', { key: 'E-mail producenta' }],
     responsible_name: ['stala', { value: s.manufacturer_name || 'Schedpol Sp. z o.o.' }], responsible_address: ['stala', { value: s.manufacturer_address || '' }], responsible_email: ['stala', { value: s.manufacturer_email || '' }],
   }
   return fields.filter(f => !['rejected', 'warning', 'info'].includes(f.code)).map(f => { const d = D[f.code] || D[name(f.code)] || ['pomin', {}]; return { code: f.code, source: d[0], config: d[1] } })

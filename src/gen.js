@@ -1,6 +1,7 @@
 import { supabase } from './supabase.js'
 import { applies } from './knowledge.js'
 import { resolveImages } from './render.js'
+import { specRowsFor } from './specs.js'
 import { runJob, startJob } from './jobs.js'
 import { DEFAULT_TITLE_PATTERN, titlePresetFor } from './languages.js'
 
@@ -36,7 +37,9 @@ export async function buildContext(familyId, channelId) {
   const excluded = new Set(bank?.excluded || [])
   const keywords = (bank?.keywords || []).filter(k => !excluded.has(k.kw)).map(k => ({ kw: k.kw, volume: k.volume }))
   if (!keywords.length) problems.push(`Bank fraz „${family.category} · ${channel.language.toUpperCase()}” jest pusty – odśwież go (Frazy kluczowe).`)
-  return { problems, family, channel, brand: br.data, template, product, facts: famFacts, factPool, brandFams: brandFams || [], keywords, library: lib.data || [],
+  // dane produktu z szablonu danych / ERP – do tabeli specyfikacji w opisie
+  const { data: ad } = product ? await supabase.from('assortment').select('data').eq('sku', product.sku).maybeSingle() : { data: null }
+  return { specRows: specRowsFor(ad?.data, family.category), problems, family, channel, brand: br.data, template, product, facts: famFacts, factPool, brandFams: brandFams || [], keywords, library: lib.data || [],
     forbidden: (rules.data || []).filter(r => ['zakazany_wzorzec', 'marka_konkurencji'].includes(r.rule_type) && (!r.language || r.language === channel.language)).map(r => r.pattern),
     // wytyczne wyuczone z uwag (ogólne + języka rynku), potem reguły redakcyjne dodane ręcznie
     instructions: [
@@ -55,7 +58,7 @@ function payloadFrom(ctx, extra) {
     facts: ctx.facts.map(f => f.content), keywords: ctx.keywords.slice(0, 150),
     template: { sections, styles: ctx.template.styles },
     images: resolveImages(ctx.template, { brand_id: ctx.family.brand_id, family: ctx.family, product: ctx.product, library: ctx.library }),
-    limits: ctx.channel.limits || {}, forbidden: ctx.forbidden, instructions: ctx.instructions,
+    limits: ctx.channel.limits || {}, forbidden: ctx.forbidden, instructions: ctx.instructions, spec_rows: ctx.specRows || [],
     title_pattern: (ctx.channel.limits || {}).title_pattern || titlePresetFor(ctx.channel.marketplace)?.pattern || DEFAULT_TITLE_PATTERN,
     ...extra,
   }
@@ -140,12 +143,15 @@ export async function generateVariants(base, { onlyMissing = true } = {}) {
     family: { model_name: ctx.family.model_name, series: ctx.family.series, category: ctx.family.category },
     facts: ctx.facts.map(f => f.content), keywords: ctx.keywords.slice(0, 80), limits: ctx.channel.limits || {}, forbidden: ctx.forbidden, instructions: ctx.instructions,
     template: { sections: ctx.template.sections.filter(s => s && s.enabled !== false), styles: ctx.template.styles },
+    spec_rows: ctx.specRows || [],
     base: { sku: baseProduct.sku, attributes: baseProduct.attributes, fields: base.fields, translation_pl: base.translation_pl, keyword_map: base.meta?.keyword_map, approved_by: base.approved_by },
   }
   const byId = Object.fromEntries(todo.map(p => [p.id, p]))
+  const { data: ads } = await supabase.from('assortment').select('sku, data').in('sku', todo.map(p => p.sku))
+  const dataBySku = Object.fromEntries((ads || []).map(a => [a.sku, a.data]))
   const variants = created.map(c => { const p = byId[c.product_id]; return { description_id: c.id, sku: p.sku, attributes: p.attributes,
     facts: ctx.factPool.filter(f => ['model', 'wariant'].includes(f.level) && applies(f, ctx.family, ctx.brandFams, p)).map(f => f.content),
-    images: resolveImages(ctx.template, { brand_id: ctx.family.brand_id, family: ctx.family, product: p, library: ctx.library }) } })
+    images: resolveImages(ctx.template, { brand_id: ctx.family.brand_id, family: ctx.family, product: p, library: ctx.library }), spec_rows: specRowsFor(dataBySku[p.sku], ctx.family.category) } })
   for (let i = 0; i < variants.length; i += 6) {
     const chunk = variants.slice(i, i + 6)
     try { await startJob('generate_variants', { ...common, variants: chunk }) }

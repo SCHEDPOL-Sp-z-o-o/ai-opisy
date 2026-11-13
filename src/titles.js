@@ -24,17 +24,20 @@ const LEVEL_PRIO = { technologia: 0, wariant: 1, model: 2, seria: 3, kategoria: 
 
 // Dane produktu do tytułu – po polsku; AI zapisuje składniki w języku kanału
 export function titleFacts({ product = {}, family = {}, families = [], pim = {}, brand = '', kb = [] }) {
-  const a = product.attributes || {}
-  const wym = dimsOf(a.wymiar) || dimsOf(product.name) || dimsOf(pim.model)
+  const a = product.attributes || {}, dd = pim.data || {}   // dd – dane z szablonu danych produktowych / eksportu ERP
+  const fromData = dd['Długość [cm]'] && dd['Szerokość [cm]'] ? [dd['Szerokość [cm]'], dd['Długość [cm]'], dd['Wysokość [cm]']].filter(x => x !== null && x !== undefined).join('x') : ''
+  const wym = dimsOf(a.wymiar) || dimsOf(product.name) || dimsOf(pim.model) || fromData
   const h = a.wysokosc_cm && wym && wym.split('x').length < 3 ? `x${String(a.wysokosc_cm).replace(/[^\d.,]+$/, '')}` : ''
-  const technologie = [...new Set([...(family.technologies || []), pim.technology].filter(Boolean).map(String))]
+  const technologie = [...new Set([...(family.technologies || []), dd['Technologia'] || pim.technology].filter(Boolean).map(String))]
   // źródła kluczowej cechy: zatwierdzone fakty Księgi wiedzy o tym produkcie (najpierw technologia, potem seria, kategoria, marka)
   const fakty = kb.filter(f => applies(f, family, families, product)).sort((x, y) => (LEVEL_PRIO[x.level] ?? 9) - (LEVEL_PRIO[y.level] ?? 9)).slice(0, 8).map(f => String(f.content).slice(0, 280))
   return {
-    kategoria: family.category || '', nazwa_pl: product.name || '', marka: brand || '', model: family.model_name || '',
-    wymiary: wym ? `${wym}${h} cm` : '', kolor: pim.color || a.kolor || '', material: a.material || '', technologia: technologie.join(', '),
-    strona: sideOf(product.name) || sideOf(product.sku), fakty_o_produkcie: fakty,
-    inne_cechy: [a.powloka, a.wykonczenie, a.odplyw, a.w_zestawie].filter(Boolean).map(String),
+    kategoria: family.category || [dd['Kategoria'], dd['Typ konstrukcji']].filter(Boolean).join(' ') || '', nazwa_pl: product.name || '', marka: brand || '', model: family.model_name || '',
+    wymiary: wym ? `${wym}${h} cm` : '', kolor: [dd['Kolor'], dd['Wykończenie']].filter(Boolean).join(' ') || pim.color || a.kolor || '',
+    material: dd['Materiał'] || a.material || '', technologia: technologie.join(', '),
+    strona: dd['Strona'] || sideOf(product.name) || sideOf(product.sku), fakty_o_produkcie: fakty,
+    inne_cechy: [dd['Antypoślizg'] === 'TAK' ? `antypoślizgowy${dd['Typ antypoślizgu'] ? ` (${dd['Typ antypoślizgu']})` : ''}` : null, dd['Typ konstrukcji'] ? `konstrukcja: ${dd['Typ konstrukcji']}` : null,
+      dd['Gwarancja [lata]'] ? `gwarancja ${dd['Gwarancja [lata]']} lat` : null, a.powloka, a.wykonczenie, a.odplyw, a.w_zestawie].filter(Boolean).map(String),
   }
 }
 
