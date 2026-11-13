@@ -4,6 +4,8 @@ import { copyTemplates, createBlankTemplates } from '../channels.js'
 import { supabase, plError } from '../supabase.js'
 import { renderDescription, resolveImages, DEFAULT_STYLES, FTP_ASSETS, ftpLink, OUTPUT_PRESETS } from '../render.js'
 import DrainLoader from '../components/DrainLoader.jsx'
+import { EMAG_LAYOUT, specRowsFor } from '../specs.js'
+import { applySpecRows } from '../render.js'
 
 function sampleFields(template) {
   const f = { HERO_IMG_ALT: 'Baner', HERO_H1: 'Brodzik akrylowy Aedler Antis 90x90 cm, Smooth White', HERO_LEAD: 'Tu pojawi się lead: 1–2 zdania z najważniejszymi korzyściami i frazą główną.', FAQ_H2: 'Najczęściej zadawane pytania' }
@@ -17,10 +19,18 @@ function sampleFields(template) {
     })
   }
   ;[1, 2, 3].forEach(i => { f[`FAQ_Q${i}`] = `Przykładowe pytanie klienta ${i}?`; f[`FAQ_A${i}`] = 'Odpowiedź wyłącznie na podstawie faktów.' })
+  for (const s of template.sections || []) {
+    const k = s?.key
+    if (s?.type === 'features') ['Kluczowa cecha 1', 'Kluczowa cecha 2', 'Kluczowa cecha 3', 'Kluczowa cecha 4', 'Kluczowa cecha 5', 'Kluczowa cecha 6'].forEach((t, i) => { f[`${k}_${i + 1}`] = t })
+    if (s?.type === 'benefits') { f[`${k}_H2`] = 'Zalety modelu'; [1, 2, 3, 4, 5].forEach(i => { f[`${k}_T${i}`] = `Zaleta ${i}`; f[`${k}_D${i}`] = 'korzyść dla klienta w jednym zdaniu.' }) }
+    if (s?.type === 'kit') { f[`${k}_H2`] = 'Wszystko, czego potrzebujesz, w jednym pudełku'; ['Element zestawu 1', 'Element zestawu 2', 'Element zestawu 3'].forEach((t, i) => { f[`${k}_LI${i + 1}`] = t }); f[`${k}_IMG_ALT`] = 'Zestaw' }
+    if (s?.type === 'specs') { f[`${k}_H2`] = 'Specyfikacja techniczna'; f[`${k}_IMG_ALT`] = 'Rysunek techniczny'
+      applySpecRows(f, template, specRowsFor({ 'Kategoria': 'brodzik', 'Długość [cm]': 120, 'Szerokość [cm]': 90, 'Wysokość [cm]': 3.5, 'Materiał': 'kompozyt mineralny', 'Antypoślizg': 'TAK', 'Gwarancja [lata]': 15 }), 'pl') }
+  }
   return f
 }
 
-const SEC_NAME = { hero: 'Nagłówek (hero)', content: 'Sekcja treści', faq: 'FAQ' }
+const SEC_NAME = { hero: 'Nagłówek (hero)', content: 'Sekcja treści', faq: 'FAQ', features: 'Kluczowe cechy (6)', benefits: 'Zalety (5)', kit: 'W zestawie (lista numerowana)', specs: 'Specyfikacja techniczna (z danych produktu)' }
 
 function TemplateEditor({ profile, templateId, crumbs }) {
   const [list, setList] = useState(null)
@@ -144,13 +154,22 @@ function TemplateEditor({ profile, templateId, crumbs }) {
                         <label className="check"><input type="checkbox" checked={s.list !== false} disabled={!admin} onChange={e => setSec(i, { list: e.target.checked })} /> lista punktów</label>
                         <label className="check"><input type="checkbox" checked={s.bold !== false} disabled={!admin} onChange={e => setSec(i, { bold: e.target.checked })} /> pogrubione zdanie</label>
                         <label className="check"><input type="checkbox" checked={!!s.accent} disabled={!admin} onChange={e => setSec(i, { accent: e.target.checked })} /> wyróżnik</label>
+                        <label className="check"><input type="checkbox" checked={s.layout === 'split'} disabled={!admin} onChange={e => setSec(i, { layout: e.target.checked ? 'split' : undefined })} /> obraz obok tekstu (na przemian)</label>
+                        {s.layout === 'split' && <label className="check"><input type="checkbox" checked={!!s.tint} disabled={!admin} onChange={e => setSec(i, { tint: e.target.checked })} /> tło sekcji</label>}
                       </div>
+                    </>
+                  )}
+                  {['features', 'benefits'].includes(s.type) && <p className="muted small">{s.type === 'features' ? 'AI wypisze 6 krótkich, konkretnych cech produktu (z ikoną ✔, w trzech kolumnach).' : 'AI napisze nagłówek „Zalety [model]” i 5 zalet: pogrubiona etykieta + korzyść w jednym zdaniu.'}</p>}
+                  {['kit', 'specs'].includes(s.type) && (
+                    <>
+                      <label>Temat sekcji<input value={s.topic || ''} disabled={!admin} onChange={e => setSec(i, { topic: e.target.value })} /></label>
+                      <p className="muted small">{s.type === 'kit' ? 'Do 6 elementów zestawu – tylko z faktów; bez informacji o zestawie sekcja zniknie.' : 'Wiersze tabeli z danych produktu (szablon danych / ERP) wg kategorii; liczby wstawia program, AI tłumaczy etykiety i opisy.'}</p>
                     </>
                   )}
                   {s.type === 'faq' && (
                     <label>Liczba pytań (max)<input type="number" min="1" max="6" value={s.max_questions || 6} disabled={!admin} onChange={e => setSec(i, { max_questions: Math.min(6, Math.max(1, Number(e.target.value) || 1)) })} /></label>
                   )}
-                  {s.type !== 'faq' && (
+                  {!['faq', 'features', 'benefits'].includes(s.type) && (
                     <>
                       <div className="img-row">
                         <label>Obrazek<select value={s.image_source || 'static'} disabled={!admin} onChange={e => setSec(i, { image_source: e.target.value })}>
@@ -188,7 +207,10 @@ function TemplateEditor({ profile, templateId, crumbs }) {
                   )}
                 </div>
               ))}
-              {admin && <button className="link-dark" onClick={addSection}>+ Dodaj sekcję treści</button>}
+              {admin && <div className="row-actions">
+                <button className="link-dark" onClick={addSection}>+ Dodaj sekcję treści</button>
+                <button className="link-dark" onClick={() => { if (confirm('Zastąpić sekcje tego szablonu układem eMAG (baner, kluczowe cechy, zalety, 3× obraz–tekst, zestaw, specyfikacja, marka, FAQ)? Zmiany zobaczysz w podglądzie – zapisz, jeśli pasują.')) setDraft({ ...draft, sections: EMAG_LAYOUT.sections.map(x => ({ ...x })), styles: { ...draft.styles, ...EMAG_LAYOUT.styles } }) }}>Wstaw układ eMAG (mokap)</button>
+              </div>}
             </div>
             <div className="panel">
               <h2>Format HTML</h2>

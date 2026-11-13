@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, plError, fetchAll } from '../supabase.js'
 import { parseTemplate, fillTemplate } from '../offerTemplate.js'
-import { SOURCES, PRODUCT_FIELDS, ATTR_KEYS, PENDING, computeField, defaultRules } from '../offerRules.js'
+import { SOURCES, PRODUCT_FIELDS, ATTR_KEYS, DATA_FIELDS, PENDING, computeField, defaultRules } from '../offerRules.js'
 import DrainLoader from '../components/DrainLoader.jsx'
 
 // Oferta i kanały: szablon kanału (eMAG) → reguły pól → automatyczne uzupełnienie → weryfikacja człowieka → eksport do oryginalnego pliku
@@ -98,14 +98,15 @@ function Rules({ tpl, rules, sampleCtx, onSaved, setMsg }) {
               <td className="rule-cfg">
                 {r.source === 'pole' && <select value={c.key || ''} onChange={e => set(f.code, { config: { key: e.target.value } })}>{Object.entries(PRODUCT_FIELDS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
                 {r.source === 'pim' && inp(r, 'col', 'nr kolumny', 80)}
+                {r.source === 'szablon' && <select value={c.key || ''} onChange={e => set(f.code, { config: { key: e.target.value } })}><option value="">— pole —</option>{DATA_FIELDS.map(k => <option key={k}>{k}</option>)}</select>}
                 {r.source === 'atrybut' && <select value={c.key || ''} onChange={e => set(f.code, { config: { key: e.target.value } })}><option value="">—</option>{ATTR_KEYS.map(k => <option key={k}>{k}</option>)}</select>}
                 {r.source === 'wymiar' && <select value={c.part || 1} onChange={e => set(f.code, { config: { part: e.target.value } })}><option value="1">1. wymiar (długość)</option><option value="2">2. wymiar (szerokość)</option><option value="3">3. wymiar</option><option value="h">wysokość</option></select>}
                 {r.source === 'tresc' && <select value={c.field || 'TITLE'} onChange={e => set(f.code, { config: { field: e.target.value } })}><option value="TITLE">tytuł</option><option value="HTML">opis HTML</option><option value="HERO_LEAD">lead</option></select>}
                 {r.source === 'zdjecie' && inp(r, 'index', 'nr zdjęcia', 70)}
                 {r.source === 'rodzina' && <select value={c.key || 'id'} onChange={e => set(f.code, { config: { key: e.target.value } })}><option value="id">numer rodziny</option><option value="name">nazwa modelu</option></select>}
                 {r.source === 'stala' && (f.values ? <select value={c.value ?? ''} onChange={e => set(f.code, { config: { value: e.target.value } })}><option value="">—</option>{f.values.map(v => <option key={v}>{v}</option>)}</select> : inp(r, 'value', 'wartość', 200))}
-                {['pole', 'pim', 'atrybut', 'wymiar'].includes(r.source) && <>{inp(r, 'factor', '× przelicznik', 90)}{inp(r, 'suffix', 'dopisek, np. " cm"', 110)}</>}
-                {['pole', 'pim', 'atrybut'].includes(r.source) && <><input className="inline-input map-input" placeholder="słownik: wartość=wartość eMAG; …" value={c.map ?? ''} onChange={e => set(f.code, { config: { map: e.target.value } })} />
+                {['pole', 'pim', 'atrybut', 'wymiar', 'szablon'].includes(r.source) && <>{inp(r, 'factor', '× przelicznik', 90)}{inp(r, 'suffix', 'dopisek, np. " cm"', 110)}</>}
+                {['pole', 'pim', 'atrybut', 'szablon'].includes(r.source) && <><input className="inline-input map-input" placeholder="słownik: wartość=wartość eMAG; …" value={c.map ?? ''} onChange={e => set(f.code, { config: { map: e.target.value } })} />
                   <label className="check small"><input type="checkbox" checked={!!c.contains} onChange={e => set(f.code, { config: { contains: e.target.checked } })} /> zawiera</label>{inp(r, 'fallback', 'gdy brak', 100)}</>}
                 {PENDING.includes(r.source) && <span className="muted small">uzupełniane w kolejnym kroku</span>}
               </td>
@@ -138,7 +139,7 @@ export default function Offer({ profile }) {
         fetchAll('offer_values', 'product_id, code, value, origin, status, note', x => x.eq('template_id', id)),
         supabase.from('product_families').select('id, model_name, category, brand_id, series'),
         fetchAll('products', 'id, sku, ean, name, family_id, attributes, images, image_url, baselinker_product_id'),
-        fetchAll('assortment', 'sku, raw, color, shape, category, model, category_path'),
+        fetchAll('assortment', 'sku, raw, color, shape, category, model, category_path, data'),
         tpl.channel_id ? fetchAll('descriptions', 'product_id, family_id, fields, html, version, status', x => x.eq('channel_id', tpl.channel_id).order('version', { ascending: false })) : Promise.resolve([]),
         tpl.channel_id ? fetchAll('product_titles', 'product_id, title, status', x => x.eq('channel_id', tpl.channel_id)).catch(() => []) : Promise.resolve([]),
       ])

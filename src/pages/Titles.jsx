@@ -63,7 +63,7 @@ export default function Titles({ profile }) {
         fetchAll('products', 'id, sku, name, family_id, attributes'),
         supabase.from('product_families').select('id, model_name, series, category, brand_id, technologies'),
         supabase.from('brands').select('id, name'),
-        fetchAll('assortment', 'sku, color, technology, model'),
+        fetchAll('assortment', 'sku, color, technology, model, data'),
         fetchAll('kb_facts', 'content, level, brand_id, category, technology, family_id, product_id, color, status', x => x.eq('status', 'zatwierdzony')).catch(() => []),
       ])
       if (tt.error) throw tt.error

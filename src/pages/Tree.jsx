@@ -5,6 +5,7 @@ import { supabase, plError } from '../supabase.js'
 import { parseModel, skuAttributes } from '../parser.js'
 import TreeDiagram from '../components/TreeDiagram.jsx'
 import { decodeBytes, repairTable, isPim, rowsFromPim, RULES } from '../pim.js'
+import { detectFormat, rowsFromProductData } from '../productData.js'
 import DrainLoader from '../components/DrainLoader.jsx'
 
 const ST = {
@@ -44,16 +45,23 @@ function Upload({ last, onDone }) {
       if (/\.xlsx?$/i.test(file.name)) {
         const XLSX = await import('xlsx')
         const wb = XLSX.read(buf, { type: 'array' })
-        table = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' })
+        // szablon danych produktowych Studio ma dane w arkuszu „Szablon” (pierwszy arkusz to instrukcja)
+        table = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames.find(n => n.trim() === 'Szablon') || wb.SheetNames[0]], { header: 1, raw: false, defval: '' })
       } else {
         table = Papa.parse(decodeBytes(buf).text, { header: false, skipEmptyLines: true, delimitersToGuess: ['\t', ';', ','] }).data
       }
       // naprawa polskich znaków komórka po komórce (także XLSX)
-      const rep = repairTable(table)
+      // szablon Studio i eksport ERP mają poprawne kodowanie – naprawa (heurystyka dla wadliwych eksportów PIM) tylko dla pozostałych plików
+      const rep = detectFormat(table[0] || []) ? { table, exact: 0, approx: 0 } : repairTable(table)
       table = rep.table
       if (rep.exact || rep.approx) note = ` Naprawiono polskie znaki w ${rep.exact + rep.approx} komórkach${rep.approx ? ` (w ${rep.approx} – odtworzone z kontekstu, bo w pliku brakowało części bajtów; sprawdź kilka nazw, a przy okazji wyeksportuj z PIM plik w UTF-8)` : ''}.`
-      let rows, kind
-      if (isPim(table)) {
+      let rows, kind, excluded = 0
+      const pdFormat = detectFormat(table[0] || [])
+      if (pdFormat) {
+        // szablon danych produktowych Studio albo eksport kartoteki z ERP – kolumny po nazwach, marka dedykowana pomijana
+        const res = rowsFromProductData(table, pdFormat)
+        rows = res.rows; excluded = res.excluded; kind = pdFormat === 'erp' ? 'ERP' : 'szablonu danych'
+      } else if (isPim(table)) {
         const res = rowsFromPim(table)
         if (res.badLayout) throw new Error('Plik wygląda jak eksport PIM, ale kolumny są przesunięte (np. EAN nie jest w oczekiwanym miejscu). Daj znać – trzeba poprawić mapowanie kolumn.')
         rows = res.rows; kind = 'PIM'
@@ -61,12 +69,12 @@ function Upload({ last, onDone }) {
         const [head, ...body] = table
         rows = rowsFromCsv(body.map(r => Object.fromEntries(head.map((h, i) => [String(h).trim(), r[i]])))); kind = 'CSV'
       }
-      if (!rows.length) throw new Error('Nie znaleziono produktów. Obsługiwane: eksport z PIM albo CSV z kolumną produkt_sku / sku.')
+      if (!rows.length) throw new Error(excluded ? `Wszystkie wiersze (${excluded}) to produkty marki dedykowanej – są pomijane.` : 'Nie znaleziono produktów. Obsługiwane: szablon danych produktowych Studio, eksport kartoteki z ERP, eksport z PIM albo CSV z kolumną produkt_sku / sku.')
       const dup = rows.length - new Set(rows.map(r => r.sku)).size
       setBusy(`Zapisywanie ${rows.length} SKU…`)
       const { data: { session } } = await supabase.auth.getSession()
       const batch = crypto.randomUUID()
-      const uniq = [...new Map(rows.map(r => [r.sku, r])).values()].map(r => ({ category_path: null, technology: null, color: null, shape: null, source: 'csv', issues: [], raw: null, ...r, batch_id: batch, uploaded_by: session.user.id, uploaded_at: new Date().toISOString() }))
+      const uniq = [...new Map(rows.map(r => [r.sku, r])).values()].map(r => ({ category_path: null, technology: null, color: null, shape: null, source: 'csv', issues: [], raw: null, data: null, ...r, batch_id: batch, uploaded_by: session.user.id, uploaded_at: new Date().toISOString() }))
       for (let i = 0; i < uniq.length; i += 500) {
         const { error } = await supabase.from('assortment').upsert(uniq.slice(i, i + 500), { onConflict: 'sku' })
         if (error) throw error
@@ -74,7 +82,7 @@ function Upload({ last, onDone }) {
       const del = await supabase.from('assortment').delete().neq('batch_id', batch)
       if (del.error) throw del.error
       const withIssues = uniq.filter(r => r.issues?.length).length
-      setMsg({ type: 'ok', text: `Zapisano ${uniq.length} SKU z pliku ${kind}${dup ? ` (pominięto ${dup} powtórzeń)` : ''}. Poprzednia lista została zastąpiona.${kind === 'PIM' ? ` Kontrola jakości: ${withIssues ? `${withIssues} SKU z uwagami – zobacz raport poniżej.` : 'bez uwag.'}` : ''}${note}` })
+      setMsg({ type: 'ok', text: `Zapisano ${uniq.length} SKU z pliku ${kind}${dup ? ` (pominięto ${dup} powtórzeń)` : ''}${excluded ? `; pominięto ${excluded} SKU marki dedykowanej` : ''}. Poprzednia lista została zastąpiona.${kind !== 'CSV' ? ` Kontrola jakości: ${withIssues ? `${withIssues} SKU z uwagami – zobacz raport poniżej.` : 'bez uwag.'}` : ''}${note}` })
       onDone()
     } catch (err) { setMsg({ type: 'error', text: plError(err.message) }) } finally { setBusy('') }
   }
@@ -85,7 +93,7 @@ function Upload({ last, onDone }) {
         <label className="btn upload">{busy ? 'Wgrywanie…' : last ? 'Wgraj nową listę' : 'Wgraj listę'}<input type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={pick} disabled={!!busy} hidden /></label>
       </div>
       <details open={isOpen} onToggle={e => setIsOpen(e.currentTarget.open)}><summary className="muted small">Jaki plik wgrać?</summary>
-        <p className="muted small">Eksport z PIM (CSV, TSV albo XLSX) – struktura drzewa powstanie ze ścieżki kategorii PIM. Działa też CSV z Baselinkera. Lista służy tylko do podglądu pokrycia i nie tworzy produktów do generowania opisów. Nowy plik zastępuje poprzednią listę.</p>
+        <p className="muted small">Szablon danych produktowych Studio (XLSX, arkusz „Szablon”) albo bezpośrednio eksport kartoteki z ERP – kolumny rozpoznawane po nazwach, produkty marki dedykowanej są pomijane. Nadal działa eksport z PIM i CSV z Baselinkera. Lista służy tylko do podglądu pokrycia i nie tworzy produktów do generowania opisów. Nowy plik zastępuje poprzednią listę.</p>
       </details>
       {busy && <p className="muted working" role="status">{busy}</p>}
       {msg && <p className={msg.type} role="status">{msg.text}</p>}
